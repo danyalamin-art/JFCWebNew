@@ -19,9 +19,11 @@ Includes public browsing (movies, showtimes, food, promos), multi-step booking w
    | Variable | Purpose |
    |----------|---------|
    | `ADMIN_PASSWORD` | Admin login (default if unset: `jfc-admin`) |
-   | `OMDB_API_KEY` | Auto-fetch movie cast, poster, IMDb rating, plot |
+   | `OMDB_API_KEY` | Auto-fetch movie cast, poster, IMDb rating, plot (never commit) |
    | `PORT` | Server port (default `3000`) |
    | `GEMINI_API_KEY` | Optional fallback if OMDb fails |
+
+   Secrets go only in local `.env` (gitignored) or your host’s env vars.
 
 3. **Run (dev)**
 
@@ -55,3 +57,20 @@ Includes public browsing (movies, showtimes, food, promos), multi-step booking w
 
 - Checkout is **demo mode** (no real card charges). Seats still lock in `db.json`.
 - Promo codes like `STUDENT20` / `FAMILY15` work if seeded promotions exist.
+
+## Repo
+
+https://github.com/danyalamin-art/JFCWebNew
+
+## Next: Firebase (planned)
+
+Local/dev currently uses `db.json`. For multi-user live hosting we will migrate to **Cloud Firestore**:
+
+1. Create a Firebase project → enable Firestore
+2. Add Admin SDK service account on the server (or use Firebase Hosting + Cloud Functions)
+3. Map collections: `movies`, `showtimes`, `bookings`, `snacks`, `promotions`, `settings`, etc.
+4. Replace `loadDatabase` / `saveDatabase` in `server.ts` with Firestore reads/writes
+5. Use transactions when booking seats (prevent double-booking)
+6. Deploy server (Cloud Run / Railway / Render) + optional static frontend
+
+See chat / project docs for the full step-by-step when ready to implement.
