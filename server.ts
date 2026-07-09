@@ -1,16 +1,18 @@
 import "dotenv/config";
 import express from "express";
 import path from "path";
-import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import { DatabaseSchema, Movie, Showtime, SnackItem, Promotion, Testimonial, FAQ, Booking, CinemaSettings } from "./src/types";
+import {
+  initDatabase,
+  loadDatabase,
+  saveDatabase,
+  createBookingAtomic,
+} from "./firestoreDb";
 
 // Helper to generate IDs
 const generateId = () => Math.random().toString(36).substring(2, 11);
-
-// Resolve db file path
-const DB_FILE = path.join(process.cwd(), "db.json");
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "jfc-admin";
 const adminSessions = new Set<string>();
@@ -480,42 +482,6 @@ const getInitialDatabase = (): DatabaseSchema => {
   };
 };
 
-// Database state
-let db: DatabaseSchema;
-
-// Load db
-const loadDatabase = (): DatabaseSchema => {
-  if (fs.existsSync(DB_FILE)) {
-    try {
-      const content = fs.readFileSync(DB_FILE, "utf-8");
-      db = JSON.parse(content);
-      // Double check all tables exist
-      if (!db.movies || !db.showtimes || !db.bookings) {
-        db = getInitialDatabase();
-        saveDatabase(db);
-      }
-      return db;
-    } catch (e) {
-      console.error("Error reading db.json, re-seeding...", e);
-      db = getInitialDatabase();
-      saveDatabase(db);
-      return db;
-    }
-  } else {
-    db = getInitialDatabase();
-    saveDatabase(db);
-    return db;
-  }
-};
-
-// Save db
-const saveDatabase = (data: DatabaseSchema) => {
-  fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf-8");
-};
-
-// Initialize DB on server start
-loadDatabase();
-
 async function fetchMovieFromOmdb(title: string, omdbKey: string): Promise<Omit<Movie, "id"> | null> {
   const omdbUrl = `https://www.omdbapi.com/?apikey=${encodeURIComponent(omdbKey)}&t=${encodeURIComponent(title)}&plot=full`;
   const res = await fetch(omdbUrl);
@@ -590,6 +556,9 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
+  // Connect to Firestore (uses firebase-service-account.json)
+  await initDatabase(getInitialDatabase);
+
   // Body parsers (large base64 images from optional Gemini path)
   app.use(express.json({ limit: "15mb" }));
   app.use(express.urlencoded({ extended: true, limit: "15mb" }));
@@ -605,7 +574,7 @@ async function startServer() {
 
   // ==================== REST API ENDPOINTS ====================
 
-  app.post("/api/admin/login", (req, res) => {
+  app.post("/api/admin/login", async (req, res) => {
     const password = String(req.body?.password || "");
     if (password !== ADMIN_PASSWORD) {
       return res.status(401).json({ error: "Invalid admin password" });
@@ -615,7 +584,7 @@ async function startServer() {
     res.json({ success: true, token });
   });
 
-  app.post("/api/admin/logout", requireAdmin, (req, res) => {
+  app.post("/api/admin/logout", requireAdmin, async (req, res) => {
     const header = req.headers.authorization || "";
     const token = header.startsWith("Bearer ") ? header.slice(7) : "";
     adminSessions.delete(token);
@@ -623,36 +592,35 @@ async function startServer() {
   });
 
   // Get entire DB or sections
-  app.get("/api/db", (req, res) => {
+  app.get("/api/db", async (req, res) => {
     const database = loadDatabase();
     res.json(database);
   });
 
-  app.post("/api/db/import", requireAdmin, (req, res) => {
+  app.post("/api/db/import", requireAdmin, async (req, res) => {
     const body = req.body;
     if (!body?.movies || !body?.showtimes || !body?.settings) {
       return res.status(400).json({ error: "Invalid backup: missing movies, showtimes, or settings" });
     }
-    saveDatabase(body as DatabaseSchema);
-    db = body as DatabaseSchema;
+    await saveDatabase(body as DatabaseSchema);
     res.json({ success: true });
   });
 
   // Settings Endpoints
-  app.get("/api/settings", (req, res) => {
+  app.get("/api/settings", async (req, res) => {
     const database = loadDatabase();
     res.json(database.settings);
   });
 
-  app.put("/api/settings", requireAdmin, (req, res) => {
+  app.put("/api/settings", requireAdmin, async (req, res) => {
     const database = loadDatabase();
     database.settings = { ...database.settings, ...req.body };
-    saveDatabase(database);
+    await saveDatabase(database);
     res.json({ success: true, settings: database.settings });
   });
 
   // Movies Endpoints
-  app.get("/api/movies", (req, res) => {
+  app.get("/api/movies", async (req, res) => {
     const database = loadDatabase();
     res.json(database.movies);
   });
@@ -766,7 +734,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/movies", requireAdmin, (req, res) => {
+  app.post("/api/movies", requireAdmin, async (req, res) => {
     const database = loadDatabase();
     const newMovie: Movie = {
       id: `movie-${generateId()}`,
@@ -782,11 +750,11 @@ async function startServer() {
       isFeatured: !!req.body.isFeatured
     };
     database.movies.push(newMovie);
-    saveDatabase(database);
+    await saveDatabase(database);
     res.json({ success: true, movie: newMovie });
   });
 
-  app.put("/api/movies/:id", requireAdmin, (req, res) => {
+  app.put("/api/movies/:id", requireAdmin, async (req, res) => {
     const database = loadDatabase();
     const index = database.movies.findIndex(m => m.id === req.params.id);
     if (index === -1) {
@@ -808,26 +776,26 @@ async function startServer() {
     };
 
     database.movies[index] = updatedMovie;
-    saveDatabase(database);
+    await saveDatabase(database);
     res.json({ success: true, movie: updatedMovie });
   });
 
-  app.delete("/api/movies/:id", requireAdmin, (req, res) => {
+  app.delete("/api/movies/:id", requireAdmin, async (req, res) => {
     const database = loadDatabase();
     database.movies = database.movies.filter(m => m.id !== req.params.id);
     // Cascade delete showtimes for this movie
     database.showtimes = database.showtimes.filter(s => s.movieId !== req.params.id);
-    saveDatabase(database);
+    await saveDatabase(database);
     res.json({ success: true });
   });
 
   // Showtimes Endpoints
-  app.get("/api/showtimes", (req, res) => {
+  app.get("/api/showtimes", async (req, res) => {
     const database = loadDatabase();
     res.json(database.showtimes);
   });
 
-  app.post("/api/showtimes", requireAdmin, (req, res) => {
+  app.post("/api/showtimes", requireAdmin, async (req, res) => {
     const database = loadDatabase();
     const movie = database.movies.find(m => m.id === req.body.movieId);
     if (!movie) {
@@ -847,11 +815,11 @@ async function startServer() {
       seatsTotal: Number(req.body.seatsTotal) || 120
     };
     database.showtimes.push(newShowtime);
-    saveDatabase(database);
+    await saveDatabase(database);
     res.json({ success: true, showtime: newShowtime });
   });
 
-  app.put("/api/showtimes/:id", requireAdmin, (req, res) => {
+  app.put("/api/showtimes/:id", requireAdmin, async (req, res) => {
     const database = loadDatabase();
     const index = database.showtimes.findIndex(s => s.id === req.params.id);
     if (index === -1) {
@@ -864,24 +832,24 @@ async function startServer() {
       price: req.body.price !== undefined ? Number(req.body.price) : database.showtimes[index].price,
       seatsTotal: req.body.seatsTotal !== undefined ? Number(req.body.seatsTotal) : database.showtimes[index].seatsTotal,
     };
-    saveDatabase(database);
+    await saveDatabase(database);
     res.json({ success: true, showtime: database.showtimes[index] });
   });
 
-  app.delete("/api/showtimes/:id", requireAdmin, (req, res) => {
+  app.delete("/api/showtimes/:id", requireAdmin, async (req, res) => {
     const database = loadDatabase();
     database.showtimes = database.showtimes.filter(s => s.id !== req.params.id);
-    saveDatabase(database);
+    await saveDatabase(database);
     res.json({ success: true });
   });
 
   // Snacks Endpoints
-  app.get("/api/snacks", (req, res) => {
+  app.get("/api/snacks", async (req, res) => {
     const database = loadDatabase();
     res.json(database.snacks);
   });
 
-  app.post("/api/snacks", requireAdmin, (req, res) => {
+  app.post("/api/snacks", requireAdmin, async (req, res) => {
     const database = loadDatabase();
     const newSnack: SnackItem = {
       id: `snack-${generateId()}`,
@@ -889,11 +857,11 @@ async function startServer() {
       price: Number(req.body.price) || 500
     };
     database.snacks.push(newSnack);
-    saveDatabase(database);
+    await saveDatabase(database);
     res.json({ success: true, snack: newSnack });
   });
 
-  app.put("/api/snacks/:id", requireAdmin, (req, res) => {
+  app.put("/api/snacks/:id", requireAdmin, async (req, res) => {
     const database = loadDatabase();
     const index = database.snacks.findIndex(s => s.id === req.params.id);
     if (index === -1) {
@@ -904,24 +872,24 @@ async function startServer() {
       ...req.body,
       price: req.body.price !== undefined ? Number(req.body.price) : database.snacks[index].price
     };
-    saveDatabase(database);
+    await saveDatabase(database);
     res.json({ success: true, snack: database.snacks[index] });
   });
 
-  app.delete("/api/snacks/:id", requireAdmin, (req, res) => {
+  app.delete("/api/snacks/:id", requireAdmin, async (req, res) => {
     const database = loadDatabase();
     database.snacks = database.snacks.filter(s => s.id !== req.params.id);
-    saveDatabase(database);
+    await saveDatabase(database);
     res.json({ success: true });
   });
 
   // Promotions Endpoints
-  app.get("/api/promotions", (req, res) => {
+  app.get("/api/promotions", async (req, res) => {
     const database = loadDatabase();
     res.json(database.promotions);
   });
 
-  app.post("/api/promotions", requireAdmin, (req, res) => {
+  app.post("/api/promotions", requireAdmin, async (req, res) => {
     const database = loadDatabase();
     const newPromo: Promotion = {
       id: `promo-${generateId()}`,
@@ -929,11 +897,11 @@ async function startServer() {
       discountPercent: Number(req.body.discountPercent) || 10
     };
     database.promotions.push(newPromo);
-    saveDatabase(database);
+    await saveDatabase(database);
     res.json({ success: true, promotion: newPromo });
   });
 
-  app.put("/api/promotions/:id", requireAdmin, (req, res) => {
+  app.put("/api/promotions/:id", requireAdmin, async (req, res) => {
     const database = loadDatabase();
     const index = database.promotions.findIndex(p => p.id === req.params.id);
     if (index === -1) {
@@ -944,35 +912,35 @@ async function startServer() {
       ...req.body,
       discountPercent: req.body.discountPercent !== undefined ? Number(req.body.discountPercent) : database.promotions[index].discountPercent
     };
-    saveDatabase(database);
+    await saveDatabase(database);
     res.json({ success: true, promotion: database.promotions[index] });
   });
 
-  app.delete("/api/promotions/:id", requireAdmin, (req, res) => {
+  app.delete("/api/promotions/:id", requireAdmin, async (req, res) => {
     const database = loadDatabase();
     database.promotions = database.promotions.filter(p => p.id !== req.params.id);
-    saveDatabase(database);
+    await saveDatabase(database);
     res.json({ success: true });
   });
 
   // FAQs Endpoints
-  app.get("/api/faqs", (req, res) => {
+  app.get("/api/faqs", async (req, res) => {
     const database = loadDatabase();
     res.json(database.faqs);
   });
 
-  app.post("/api/faqs", requireAdmin, (req, res) => {
+  app.post("/api/faqs", requireAdmin, async (req, res) => {
     const database = loadDatabase();
     const newFaq: FAQ = {
       id: `faq-${generateId()}`,
       ...req.body
     };
     database.faqs.push(newFaq);
-    saveDatabase(database);
+    await saveDatabase(database);
     res.json({ success: true, faq: newFaq });
   });
 
-  app.put("/api/faqs/:id", requireAdmin, (req, res) => {
+  app.put("/api/faqs/:id", requireAdmin, async (req, res) => {
     const database = loadDatabase();
     const index = database.faqs.findIndex(f => f.id === req.params.id);
     if (index === -1) {
@@ -982,24 +950,24 @@ async function startServer() {
       ...database.faqs[index],
       ...req.body
     };
-    saveDatabase(database);
+    await saveDatabase(database);
     res.json({ success: true, faq: database.faqs[index] });
   });
 
-  app.delete("/api/faqs/:id", requireAdmin, (req, res) => {
+  app.delete("/api/faqs/:id", requireAdmin, async (req, res) => {
     const database = loadDatabase();
     database.faqs = database.faqs.filter(f => f.id !== req.params.id);
-    saveDatabase(database);
+    await saveDatabase(database);
     res.json({ success: true });
   });
 
   // Testimonials Endpoints
-  app.get("/api/testimonials", (req, res) => {
+  app.get("/api/testimonials", async (req, res) => {
     const database = loadDatabase();
     res.json(database.testimonials);
   });
 
-  app.post("/api/testimonials", (req, res) => {
+  app.post("/api/testimonials", async (req, res) => {
     const database = loadDatabase();
     const newTestimonial: Testimonial = {
       id: `t-${generateId()}`,
@@ -1009,68 +977,54 @@ async function startServer() {
       date: new Date().toISOString().split("T")[0]
     };
     database.testimonials.push(newTestimonial);
-    saveDatabase(database);
+    await saveDatabase(database);
     res.json({ success: true, testimonial: newTestimonial });
   });
 
   // Bookings API (Create, Get, Refund)
-  app.get("/api/bookings", (req, res) => {
+  app.get("/api/bookings", async (req, res) => {
     const database = loadDatabase();
     res.json(database.bookings);
   });
 
-  app.post("/api/bookings", (req, res) => {
-    const database = loadDatabase();
+  app.post("/api/bookings", async (req, res) => {
     const { showtimeId, seats, foodItems, customerName, customerEmail, customerPhone, subtotal, discount, total } = req.body;
 
-    const showtimeIndex = database.showtimes.findIndex(s => s.id === showtimeId);
-    if (showtimeIndex === -1) {
-      return res.status(404).json({ error: "Showtime not found" });
+    if (!showtimeId || !Array.isArray(seats) || seats.length === 0) {
+      return res.status(400).json({ error: "Showtime and at least one seat are required" });
     }
 
-    const showtime = database.showtimes[showtimeIndex];
-
-    // Check if seats are already booked
-    const overlap = seats.some((seat: string) => showtime.seatsBooked.includes(seat));
-    if (overlap) {
-      return res.status(400).json({ error: "One or more selected seats have already been booked. Please choose other seats." });
+    try {
+      const newBooking = await createBookingAtomic({
+        showtimeId,
+        seats,
+        foodItems: foodItems || [],
+        customerName,
+        customerEmail,
+        customerPhone,
+        subtotal: Number(subtotal),
+        discount: Number(discount) || 0,
+        total: Number(total),
+        generateId,
+      });
+      res.json({ success: true, booking: newBooking });
+    } catch (err: any) {
+      const msg = String(err?.message || err);
+      if (msg === "SHOWTIME_NOT_FOUND") {
+        return res.status(404).json({ error: "Showtime not found" });
+      }
+      if (msg.startsWith("SEATS_TAKEN:")) {
+        const taken = msg.replace("SEATS_TAKEN:", "");
+        return res.status(400).json({
+          error: `Seat(s) ${taken} are already reserved. Please pick other seats.`,
+        });
+      }
+      console.error("Booking failed:", err);
+      res.status(500).json({ error: msg || "Booking failed" });
     }
-
-    // Allocate seats
-    showtime.seatsBooked = [...showtime.seatsBooked, ...seats];
-    database.showtimes[showtimeIndex] = showtime;
-
-    const movie = database.movies.find(m => m.id === showtime.movieId);
-
-    const bookingId = `booking-${generateId()}`;
-    const newBooking: Booking = {
-      id: bookingId,
-      showtimeId,
-      movieTitle: showtime.movieTitle,
-      moviePoster: movie?.poster || "",
-      date: showtime.date,
-      time: showtime.time,
-      hall: showtime.hall,
-      format: showtime.format,
-      seats,
-      foodItems: foodItems || [],
-      subtotal: Number(subtotal),
-      discount: Number(discount) || 0,
-      total: Number(total),
-      customerName,
-      customerEmail,
-      customerPhone,
-      paymentStatus: "paid",
-      bookingDate: new Date().toISOString(),
-      qrCodeValue: `JFC-${showtime.movieTitle.substring(0, 4).toUpperCase()}-${bookingId.toUpperCase()}`
-    };
-
-    database.bookings.push(newBooking);
-    saveDatabase(database);
-    res.json({ success: true, booking: newBooking });
   });
 
-  app.post("/api/bookings/:id/refund", requireAdmin, (req, res) => {
+  app.post("/api/bookings/:id/refund", requireAdmin, async (req, res) => {
     const database = loadDatabase();
     const bookingIndex = database.bookings.findIndex(b => b.id === req.params.id);
     if (bookingIndex === -1) {
@@ -1092,11 +1046,11 @@ async function startServer() {
 
     booking.paymentStatus = "refunded";
     database.bookings[bookingIndex] = booking;
-    saveDatabase(database);
+    await saveDatabase(database);
     res.json({ success: true, booking });
   });
 
-  app.delete("/api/bookings/:id", requireAdmin, (req, res) => {
+  app.delete("/api/bookings/:id", requireAdmin, async (req, res) => {
     const database = loadDatabase();
     const booking = database.bookings.find(b => b.id === req.params.id);
     if (booking) {
@@ -1109,12 +1063,12 @@ async function startServer() {
       }
     }
     database.bookings = database.bookings.filter(b => b.id !== req.params.id);
-    saveDatabase(database);
+    await saveDatabase(database);
     res.json({ success: true });
   });
 
   // Dashboard Stats
-  app.get("/api/dashboard-stats", (req, res) => {
+  app.get("/api/dashboard-stats", async (req, res) => {
     const database = loadDatabase();
     const paidBookings = database.bookings.filter(b => b.paymentStatus === "paid");
     const totalRevenue = paidBookings.reduce((sum, b) => sum + b.total, 0);
@@ -1151,7 +1105,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("*", (req, res) => {
+    app.get("*", async (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }

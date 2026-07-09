@@ -47,11 +47,13 @@ Includes public browsing (movies, showtimes, food, promos), multi-step booking w
 - **Movies → type title → Add Movie instantly** → OMDb fills synopsis, cast, ratings, poster.
 - You can still edit fields manually after import (e.g. YouTube trailer ID, Featured flag).
 
-## Data
+## Data (Firebase / Firestore)
 
-- Server stores data in `db.json` (created on first run).
-- Bookings update seats on the server so multiple browsers stay in sync.
-- Export/import backups from Admin → Settings.
+- Production data lives in **Google Cloud Firestore** (project `jfcnewweb`).
+- Put your service account file at `firebase-service-account.json` (gitignored) or set `FIREBASE_SERVICE_ACCOUNT_PATH`.
+- First server start **seeds** movies/showtimes if Firestore is empty.
+- Bookings use a **Firestore transaction** so two people cannot take the same seat.
+- Export/import backups from Admin → Settings still work (full JSON dump/restore).
 
 ## Demo notes
 
