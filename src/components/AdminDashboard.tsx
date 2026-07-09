@@ -19,6 +19,8 @@ import {
   getAdminToken,
   exportDatabaseJson,
   importDatabase,
+  fetchOmdbStatus,
+  saveOmdbKey,
 } from "../lib/api";
 
 interface AdminDashboardProps {
@@ -131,14 +133,29 @@ export default function AdminDashboard({ initialDb, onRefreshData, onClose }: Ad
   const [backupMessage, setBackupMessage] = useState("");
   const [backupError, setBackupError] = useState(false);
 
-  // OMDb & Movie Lookup States
-  const [omdbApiKey, setOmdbApiKey] = useState<string>(() => localStorage.getItem("jfc_omdb_api_key") || "");
-  const [keySavedMessage, setKeySavedMessage] = useState<string>("");
+  // OMDb lives on the server (env + Firestore) — never re-paste after logout
+  const [omdbConfigured, setOmdbConfigured] = useState(false);
+  const [omdbHint, setOmdbHint] = useState<string | null>(null);
+  const [omdbKeyInput, setOmdbKeyInput] = useState("");
+  const [keySavedMessage, setKeySavedMessage] = useState("");
   const [aiMovieTitle, setAiMovieTitle] = useState("");
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiStatusMessage, setAiStatusMessage] = useState("");
   const [aiError, setAiError] = useState("");
   const [showManualForm, setShowManualForm] = useState(false);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    fetchOmdbStatus()
+      .then((s) => {
+        setOmdbConfigured(s.configured);
+        setOmdbHint(s.hint);
+      })
+      .catch(() => {
+        setOmdbConfigured(false);
+        setOmdbHint(null);
+      });
+  }, [isAuthenticated]);
 
   // Add Showtime
   const [showtimeForm, setShowtimeForm] = useState({
@@ -216,7 +233,7 @@ export default function AdminDashboard({ initialDb, onRefreshData, onClose }: Ad
     fileReader.readAsText(file);
   };
 
-  // Movie actions — type title → OMDb fills details → save
+  // Movie actions — type title → server OMDb fills details → save
   const handleAiAutoAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!aiMovieTitle.trim()) return;
@@ -227,7 +244,7 @@ export default function AdminDashboard({ initialDb, onRefreshData, onClose }: Ad
     setAiStatusMessage("Looking up movie on OMDb…");
 
     try {
-      const fetchedDetails = await autoFetchMovieDetails(aiMovieTitle, omdbApiKey || undefined);
+      const fetchedDetails = await autoFetchMovieDetails(aiMovieTitle);
       setAiStatusMessage("Saving movie to cinema database…");
       await createMovie(fetchedDetails);
 
@@ -238,10 +255,25 @@ export default function AdminDashboard({ initialDb, onRefreshData, onClose }: Ad
       onRefreshData();
     } catch (err: any) {
       console.error(err);
-      setAiError(err.message || "Failed to auto-fetch details. Check OMDB_API_KEY or use the manual form.");
+      setAiError(err.message || "Failed to auto-fetch details. Check OMDb key or use the manual form.");
     } finally {
       setIsAiLoading(false);
       setAiStatusMessage("");
+    }
+  };
+
+  const handleSaveOmdbKey = async () => {
+    const key = omdbKeyInput.trim();
+    if (!key) return;
+    try {
+      const s = await saveOmdbKey(key);
+      setOmdbConfigured(s.configured);
+      setOmdbHint(s.hint);
+      setOmdbKeyInput("");
+      setKeySavedMessage("Saved permanently on server");
+      setTimeout(() => setKeySavedMessage(""), 3000);
+    } catch (err: any) {
+      setAiError(err.message || "Could not save OMDb key");
     }
   };
 
@@ -723,42 +755,54 @@ export default function AdminDashboard({ initialDb, onRefreshData, onClose }: Ad
                   </div>
                   
                   <p className="text-xs text-cinema-text-muted">
-                    Type a movie title and click Add. The server queries OMDb (IMDb data) for synopsis, rating, cast, runtime, age rating, and poster.
-                    Prefer setting <span className="font-mono text-gold-500/80">OMDB_API_KEY</span> in your <span className="font-mono">.env</span> file.
+                    Type a movie title and click Add. The server uses your OMDb key stored permanently
+                    (no need to paste again after logout).
                   </p>
 
-                  {/* Optional per-session OMDb key override if not in .env */}
-                  <div className="bg-black/45 border border-cinema-gray/40 rounded-lg p-3.5 flex flex-col sm:flex-row items-start sm:items-center gap-3 justify-between">
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                        <Database className="w-3.5 h-3.5 text-gold-500" />
-                        OMDb key (optional override)
-                      </span>
-                      <span className="text-[10px] text-slate-500">
-                        {omdbApiKey
-                          ? "Session key set — used if server .env key is missing."
-                          : "Leave empty if OMDB_API_KEY is already in server .env."}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 w-full sm:w-auto shrink-0 mt-1 sm:mt-0">
-                      <input
-                        type="password"
-                        placeholder="OMDb API key"
-                        value={omdbApiKey}
-                        onChange={(e) => {
-                          const val = e.target.value.trim();
-                          setOmdbApiKey(val);
-                          if (val) localStorage.setItem("jfc_omdb_api_key", val);
-                          else localStorage.removeItem("jfc_omdb_api_key");
-                          setKeySavedMessage(val ? "Saved" : "");
-                          setTimeout(() => setKeySavedMessage(""), 2000);
-                        }}
-                        className="bg-cinema-black border border-cinema-gray rounded px-3 py-1.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-gold-500 w-full sm:w-48 font-mono"
-                      />
-                      {keySavedMessage && (
-                        <span className="text-[10px] font-mono font-bold text-emerald-400 shrink-0 uppercase">{keySavedMessage}</span>
+                  {/* Permanent OMDb status — key lives on server / Firestore */}
+                  <div className="bg-black/45 border border-cinema-gray/40 rounded-lg p-3.5 flex flex-col gap-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                          <Database className="w-3.5 h-3.5 text-gold-500" />
+                          OMDb API
+                        </span>
+                        <span className="text-[10px] text-slate-500">
+                          {omdbConfigured
+                            ? `Connected permanently${omdbHint ? ` (${omdbHint})` : ""}. Survives CMS logout.`
+                            : "Not configured yet — paste once and Save. It stays on the server."}
+                        </span>
+                      </div>
+                      {omdbConfigured && (
+                        <span className="text-[10px] font-mono font-bold text-emerald-400 uppercase shrink-0">
+                          Active
+                        </span>
                       )}
                     </div>
+                    {!omdbConfigured && (
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                        <input
+                          type="password"
+                          placeholder="Paste OMDb API key once"
+                          value={omdbKeyInput}
+                          onChange={(e) => setOmdbKeyInput(e.target.value)}
+                          className="bg-cinema-black border border-cinema-gray rounded px-3 py-1.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-gold-500 flex-1 font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleSaveOmdbKey}
+                          disabled={!omdbKeyInput.trim()}
+                          className="px-4 py-1.5 rounded bg-gold-500 hover:bg-gold-600 disabled:opacity-40 text-cinema-black text-[10px] font-bold uppercase tracking-wider"
+                        >
+                          Save permanently
+                        </button>
+                      </div>
+                    )}
+                    {keySavedMessage && (
+                      <span className="text-[10px] font-mono font-bold text-emerald-400 uppercase">
+                        {keySavedMessage}
+                      </span>
+                    )}
                   </div>
 
                   <form onSubmit={handleAiAutoAdd} className="flex flex-col md:flex-row gap-3 items-end mt-1">

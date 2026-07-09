@@ -9,6 +9,8 @@ import {
   loadDatabase,
   saveDatabase,
   createBookingAtomic,
+  resolveOmdbKey,
+  setServerConfig,
 } from "./firestoreDb";
 
 // Helper to generate IDs
@@ -591,6 +593,26 @@ async function startServer() {
     res.json({ success: true });
   });
 
+  // OMDb key is stored server-side (env + Firestore). Never expose full key to browser.
+  app.get("/api/admin/omdb-status", requireAdmin, async (_req, res) => {
+    const key = await resolveOmdbKey();
+    res.json({
+      configured: !!key,
+      hint: key ? `••••${key.slice(-4)}` : null,
+    });
+  });
+
+  app.post("/api/admin/omdb-key", requireAdmin, async (req, res) => {
+    const key = String(req.body?.omdbApiKey || "").trim();
+    if (!key || key.length < 4) {
+      return res.status(400).json({ error: "Valid OMDb API key required" });
+    }
+    await setServerConfig({ omdbApiKey: key });
+    // Keep process.env in sync for this process
+    process.env.OMDB_API_KEY = key;
+    res.json({ success: true, configured: true, hint: `••••${key.slice(-4)}` });
+  });
+
   // Get entire DB or sections
   app.get("/api/db", async (req, res) => {
     const database = loadDatabase();
@@ -632,10 +654,8 @@ async function startServer() {
       return res.status(400).json({ error: "Movie title is required" });
     }
 
-    let omdbKey = (bodyKey || process.env.OMDB_API_KEY || "").trim();
-    if (/^your_|_here$/i.test(omdbKey) || omdbKey === "MY_OMDB_API_KEY") {
-      omdbKey = "";
-    }
+    // Prefer body (optional) → .env → Firestore meta/serverConfig (permanent)
+    const omdbKey = await resolveOmdbKey(bodyKey);
 
     try {
       if (omdbKey) {
@@ -649,7 +669,7 @@ async function startServer() {
       if (!ai) {
         return res.status(500).json({
           error:
-            "Set OMDB_API_KEY in your .env file (get a free key at omdbapi.com), then restart the server. You can also paste a key in Admin → Movies.",
+            "OMDb API key is not configured. Add OMDB_API_KEY to .env or save it once in Admin → Movies.",
         });
       }
 

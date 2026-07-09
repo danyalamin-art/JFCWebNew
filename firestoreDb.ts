@@ -150,6 +150,34 @@ async function persistAll(data: DatabaseSchema): Promise<void> {
   ]);
 }
 
+/** Server-only config (never sent to public /api/db). */
+export async function getServerConfig(): Promise<{ omdbApiKey?: string }> {
+  const snap = await firestore.collection("meta").doc("serverConfig").get();
+  if (!snap.exists) return {};
+  return snap.data() as { omdbApiKey?: string };
+}
+
+export async function setServerConfig(partial: { omdbApiKey?: string }): Promise<void> {
+  await firestore
+    .collection("meta")
+    .doc("serverConfig")
+    .set(strip(partial), { merge: true });
+}
+
+/** OMDb key: request override → env → Firestore (persists across logins). */
+export async function resolveOmdbKey(bodyKey?: string): Promise<string> {
+  const fromBody = (bodyKey || "").trim();
+  if (fromBody && !/^your_|_here$/i.test(fromBody) && fromBody !== "MY_OMDB_API_KEY") {
+    return fromBody;
+  }
+  const fromEnv = (process.env.OMDB_API_KEY || "").trim();
+  if (fromEnv && !/^your_|_here$/i.test(fromEnv)) {
+    return fromEnv;
+  }
+  const cfg = await getServerConfig();
+  return (cfg.omdbApiKey || "").trim();
+}
+
 /** Load from Firestore (seed if empty). Call once at server start. */
 export async function initDatabase(seed: () => DatabaseSchema): Promise<DatabaseSchema> {
   initFirebase();
@@ -170,6 +198,16 @@ export async function initDatabase(seed: () => DatabaseSchema): Promise<Database
     console.log(
       `✓ Firestore loaded: ${cache.movies.length} movies, ${cache.showtimes.length} showtimes, ${cache.bookings.length} bookings`
     );
+  }
+
+  // Persist OMDb key from .env into Firestore so admin never needs to re-paste
+  const envOmdb = (process.env.OMDB_API_KEY || "").trim();
+  if (envOmdb && !/^your_|_here$/i.test(envOmdb)) {
+    const cfg = await getServerConfig();
+    if (cfg.omdbApiKey !== envOmdb) {
+      await setServerConfig({ omdbApiKey: envOmdb });
+      console.log("✓ OMDb API key saved to Firestore (meta/serverConfig)");
+    }
   }
 
   return cache;

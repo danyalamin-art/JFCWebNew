@@ -98,15 +98,24 @@ export async function deleteMovie(id: string): Promise<boolean> {
   return true;
 }
 
-export async function autoFetchMovieDetails(
-  title: string,
-  omdbKey?: string
-): Promise<Omit<Movie, "id">> {
+export async function autoFetchMovieDetails(title: string): Promise<Omit<Movie, "id">> {
+  // OMDb key lives on the server (.env + Firestore) — no need to send from browser
   const data = await api<{ movie: Omit<Movie, "id"> }>("/api/movies/auto-fetch", {
     method: "POST",
-    body: JSON.stringify({ title, omdbKey: omdbKey || undefined }),
+    body: JSON.stringify({ title }),
   });
   return data.movie;
+}
+
+export async function fetchOmdbStatus(): Promise<{ configured: boolean; hint: string | null }> {
+  return api("/api/admin/omdb-status");
+}
+
+export async function saveOmdbKey(omdbApiKey: string): Promise<{ configured: boolean; hint: string | null }> {
+  return api("/api/admin/omdb-key", {
+    method: "POST",
+    body: JSON.stringify({ omdbApiKey }),
+  });
 }
 
 // ---------- Showtimes ----------
