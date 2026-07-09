@@ -53,33 +53,37 @@ export default function HomeView({ db, onNavigate, onSelectMovie, onBookMovie }:
   return (
     <div id="home-view" className="flex flex-col gap-16 pb-20">
       
-      {/* SECTION 1: HERO MOVIE SLIDER */}
+      {/* SECTION 1: HERO MOVIE SLIDER — brighter art, compact height */}
       {activeHero && (
-        <section id="hero-slider" className="relative w-full h-[65vh] sm:h-[80vh] bg-black overflow-hidden flex items-end">
-          {/* Banner backdrop with OLED darken mask */}
+        <section
+          id="hero-slider"
+          className="relative w-full h-[42vh] min-h-[280px] max-h-[420px] sm:h-[48vh] sm:max-h-[480px] bg-[#0a0a0c] overflow-hidden flex items-end"
+        >
+          {/* Banner — high visibility, light scrim only where text sits */}
           <div className="absolute inset-0 z-0">
             <img
-              src={activeHero.banner}
+              src={activeHero.banner || activeHero.poster}
               alt={activeHero.title}
-              className="w-full h-full object-cover opacity-45 scale-[1.02] transition-all duration-1000"
+              className="w-full h-full object-cover object-top sm:object-center brightness-110 contrast-[1.05] transition-all duration-700"
               referrerPolicy="no-referrer"
             />
-            <div className="absolute inset-0 bg-gradient-to-t from-cinema-black via-cinema-black/40 to-transparent" />
-            <div className="absolute inset-0 bg-gradient-to-r from-cinema-black/80 via-transparent to-transparent hidden md:block" />
+            {/* Soft bottom fade for readable text — not a heavy dark wash */}
+            <div className="absolute inset-0 bg-gradient-to-t from-cinema-black/90 via-cinema-black/25 to-black/10" />
+            <div className="absolute inset-0 bg-gradient-to-r from-cinema-black/55 via-transparent to-transparent hidden md:block" />
           </div>
 
           {/* Carousel Slider Controls */}
           {featuredMovies.length > 1 && (
-            <div className="absolute right-6 bottom-10 z-20 flex gap-2">
+            <div className="absolute right-4 sm:right-6 bottom-6 sm:bottom-8 z-20 flex gap-2">
               <button
                 onClick={handlePrevHero}
-                className="p-3 rounded-full bg-cinema-card/70 border border-slate-700 hover:border-gold-500 text-slate-300 hover:text-white transition-all cursor-pointer"
+                className="p-2.5 rounded-full bg-black/40 border border-white/15 hover:border-gold-500 text-slate-200 hover:text-white backdrop-blur-sm transition-all cursor-pointer"
               >
                 <ChevronLeft className="w-5 h-5" />
               </button>
               <button
                 onClick={handleNextHero}
-                className="p-3 rounded-full bg-cinema-card/70 border border-slate-700 hover:border-gold-500 text-slate-300 hover:text-white transition-all cursor-pointer"
+                className="p-2.5 rounded-full bg-black/40 border border-white/15 hover:border-gold-500 text-slate-200 hover:text-white backdrop-blur-sm transition-all cursor-pointer"
               >
                 <ChevronRight className="w-5 h-5" />
               </button>
@@ -87,36 +91,36 @@ export default function HomeView({ db, onNavigate, onSelectMovie, onBookMovie }:
           )}
 
           {/* Hero Content layout */}
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full pb-10 sm:pb-20 relative z-10">
-            <div className="max-w-2xl flex flex-col gap-4">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full pb-6 sm:pb-10 relative z-10">
+            <div className="max-w-2xl flex flex-col gap-2.5 sm:gap-3">
               <div className="flex items-center gap-2.5">
                 <span className="bg-gold-500 text-black text-[10px] font-bold px-2 py-0.5 rounded-xs uppercase tracking-tighter">
                   Featured Spotlight
                 </span>
-                <span className="text-slate-300 text-xs font-mono font-semibold">
+                <span className="text-white/90 text-xs font-mono font-semibold drop-shadow-sm">
                   IMDB {activeHero.imdbRating.toFixed(1)}/10
                 </span>
               </div>
 
-              <h2 className="font-display font-black italic tracking-tighter uppercase text-3xl sm:text-5xl lg:text-6.5xl text-white leading-none">
+              <h2 className="font-display font-black italic tracking-tighter uppercase text-2xl sm:text-4xl lg:text-5xl text-white leading-none drop-shadow-md">
                 {activeHero.title}
               </h2>
 
-              <p className="text-sm sm:text-base text-gray-300 leading-relaxed line-clamp-3">
+              <p className="text-sm text-white/85 leading-relaxed line-clamp-2 sm:line-clamp-3 drop-shadow-sm max-w-xl">
                 {activeHero.synopsis}
               </p>
 
               {/* Action row */}
-              <div className="flex flex-wrap items-center gap-4 mt-2">
+              <div className="flex flex-wrap items-center gap-3 mt-1">
                 <button
                   onClick={() => onBookMovie(activeHero)}
-                  className="px-6 py-2.5 bg-gold-600 hover:bg-gold-500 text-black text-xs font-bold uppercase tracking-widest transition-all rounded-xs active:scale-95 cursor-pointer shadow-md shadow-gold-600/10"
+                  className="px-5 py-2 bg-gold-600 hover:bg-gold-500 text-black text-xs font-bold uppercase tracking-widest transition-all rounded-xs active:scale-95 cursor-pointer shadow-md shadow-gold-600/20"
                 >
                   Book Tickets
                 </button>
                 <button
                   onClick={() => onSelectMovie(activeHero)}
-                  className="px-6 py-2.5 bg-white/10 backdrop-blur-md border border-white/20 text-white text-xs font-bold uppercase tracking-widest transition-all rounded-xs hover:bg-white/15 active:scale-95 cursor-pointer"
+                  className="px-5 py-2 bg-black/35 backdrop-blur-md border border-white/25 text-white text-xs font-bold uppercase tracking-widest transition-all rounded-xs hover:bg-black/50 active:scale-95 cursor-pointer"
                 >
                   View Details
                 </button>
