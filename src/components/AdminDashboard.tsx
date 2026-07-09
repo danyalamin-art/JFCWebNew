@@ -265,26 +265,22 @@ export default function AdminDashboard({ initialDb, onRefreshData, onClose }: Ad
     fileReader.readAsText(file);
   };
 
-  const pickSuggestion = (s: MovieSuggestion) => {
-    setAiMovieTitle(s.title);
-    setSelectedImdbId(s.imdbID || undefined);
-    setSuggestions([]);
-    setShowSuggestions(false);
-  };
-
-  // Movie actions — type title → server OMDb fills details → save
-  const handleAiAutoAdd = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!aiMovieTitle.trim()) return;
+  // Add movie from typed title or a suggestion click
+  const addMovieFromOmdb = async (title: string, imdbID?: string) => {
+    const t = title.trim();
+    if (!t || isAiLoading) return;
 
     setIsAiLoading(true);
     setAiError("");
     setMovieSuccess("");
     setShowSuggestions(false);
+    setSuggestions([]);
+    setAiMovieTitle(t);
+    setSelectedImdbId(imdbID);
     setAiStatusMessage("Looking up movie on OMDb…");
 
     try {
-      const fetchedDetails = await autoFetchMovieDetails(aiMovieTitle, selectedImdbId);
+      const fetchedDetails = await autoFetchMovieDetails(t, imdbID);
       setAiStatusMessage("Saving movie to cinema database…");
       await createMovie(fetchedDetails);
 
@@ -293,7 +289,6 @@ export default function AdminDashboard({ initialDb, onRefreshData, onClose }: Ad
       );
       setAiMovieTitle("");
       setSelectedImdbId(undefined);
-      setSuggestions([]);
       onRefreshData();
     } catch (err: any) {
       console.error(err);
@@ -302,6 +297,16 @@ export default function AdminDashboard({ initialDb, onRefreshData, onClose }: Ad
       setIsAiLoading(false);
       setAiStatusMessage("");
     }
+  };
+
+  /** Clicking a suggestion adds the movie immediately (no second button press). */
+  const pickSuggestion = (s: MovieSuggestion) => {
+    void addMovieFromOmdb(s.title, s.imdbID || undefined);
+  };
+
+  const handleAiAutoAdd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await addMovieFromOmdb(aiMovieTitle, selectedImdbId);
   };
 
   const handleSaveOmdbKey = async () => {

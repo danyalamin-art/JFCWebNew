@@ -500,13 +500,21 @@ async function searchOmdbSuggestions(
     return [];
   }
 
-  return data.Search.slice(0, 8).map((item: any) => ({
+  // Newest first (OMDb often returns classics first). Year may be "2026" or "2026–".
+  const yearNum = (y: string) => {
+    const m = String(y || "").match(/\d{4}/);
+    return m ? parseInt(m[0], 10) : 0;
+  };
+
+  return data.Search.map((item: any) => ({
     title: item.Title || "",
     year: item.Year || "",
     imdbID: item.imdbID || "",
     type: item.Type || "movie",
     poster: item.Poster && item.Poster !== "N/A" ? item.Poster : "",
-  }));
+  }))
+    .sort((a: { year: string }, b: { year: string }) => yearNum(b.year) - yearNum(a.year))
+    .slice(0, 8);
 }
 
 async function fetchMovieFromOmdb(
