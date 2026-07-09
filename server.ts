@@ -517,6 +517,39 @@ async function searchOmdbSuggestions(
     .slice(0, 8);
 }
 
+/** Bump Amazon/OMDb poster URLs to a higher resolution. */
+function upgradePosterUrl(url: string): string {
+  if (!url || url === "N/A") return url;
+  return url
+    .replace(/_V1_SX\d+/gi, "_V1_SX1000")
+    .replace(/_V1_SY\d+/gi, "_V1_SY1500")
+    .replace(/_V1_UX\d+/gi, "_V1_UX1000")
+    .replace(/_V1_UY\d+/gi, "_V1_UY1500")
+    .replace(/SX\d+\.jpg/gi, "SX1000.jpg")
+    .replace(/SY\d+\.jpg/gi, "SY1500.jpg");
+}
+
+/**
+ * Optional landscape banner via TMDB (free key: themoviedb.org).
+ * OMDb only returns portrait posters — TMDB has wide “backdrop” art.
+ */
+async function fetchTmdbBackdrop(imdbID: string): Promise<string | null> {
+  const tmdbKey = (process.env.TMDB_API_KEY || "").trim();
+  if (!tmdbKey || !imdbID) return null;
+  try {
+    const findUrl = `https://api.themoviedb.org/3/find/${encodeURIComponent(imdbID)}?api_key=${encodeURIComponent(tmdbKey)}&external_source=imdb_id`;
+    const findRes = await fetch(findUrl);
+    if (!findRes.ok) return null;
+    const findData = await findRes.json();
+    const hit = findData.movie_results?.[0] || findData.tv_results?.[0];
+    if (!hit?.backdrop_path) return null;
+    return `https://image.tmdb.org/t/p/w1280${hit.backdrop_path}`;
+  } catch (e) {
+    console.warn("TMDB backdrop lookup failed:", e);
+    return null;
+  }
+}
+
 async function fetchMovieFromOmdb(
   title: string,
   omdbKey: string,
@@ -565,15 +598,26 @@ async function fetchMovieFromOmdb(
     if (!isNaN(num)) imdbRating = num;
   }
 
-  const poster =
+  const resolvedImdb = (data.imdbID || imdbID || "").trim();
+  const rawPoster =
     data.Poster && data.Poster !== "N/A"
       ? data.Poster
       : "https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?auto=format&fit=crop&w=600&q=80";
+  const poster = upgradePosterUrl(rawPoster);
+
+  // Prefer real landscape backdrop when TMDB key is set; else leave banner = poster
+  // (homepage uses a poster-friendly layout when banner === poster)
+  let banner = poster;
+  if (resolvedImdb) {
+    const backdrop = await fetchTmdbBackdrop(resolvedImdb);
+    if (backdrop) banner = backdrop;
+  }
 
   return {
     title: data.Title || title,
     poster,
-    banner: poster,
+    banner,
+    imdbID: resolvedImdb || undefined,
     synopsis:
       data.Plot && data.Plot !== "N/A"
         ? data.Plot

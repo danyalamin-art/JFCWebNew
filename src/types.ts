@@ -20,6 +20,8 @@ export interface Movie {
   isFeatured: boolean;
   /** Lower = earlier in homepage Featured Spotlight carousel (optional). */
   featuredOrder?: number;
+  /** IMDb id e.g. tt0133093 — used for higher-res / landscape art when available */
+  imdbID?: string;
 }
 
 export interface Showtime {

@@ -53,82 +53,113 @@ export default function HomeView({ db, onNavigate, onSelectMovie, onBookMovie }:
   return (
     <div id="home-view" className="flex flex-col gap-16 pb-20">
       
-      {/* SECTION 1: HERO MOVIE SLIDER — brighter art, compact height */}
-      {activeHero && (
+      {/* SECTION 1: FEATURED SPOTLIGHT
+          OMDb only has portrait posters — if banner === poster we use a poster card layout
+          (blurred ambient bg + sharp poster). True landscape banners use full-bleed art. */}
+      {activeHero && (() => {
+        const posterSrc = activeHero.poster;
+        const bannerSrc = activeHero.banner || posterSrc;
+        const hasLandscapeBanner =
+          !!activeHero.banner &&
+          activeHero.banner !== activeHero.poster &&
+          !/SX\d{2,3}\.jpg/i.test(activeHero.banner);
+
+        return (
         <section
           id="hero-slider"
-          className="relative w-full h-[42vh] min-h-[280px] max-h-[420px] sm:h-[48vh] sm:max-h-[480px] bg-[#0a0a0c] overflow-hidden flex items-end"
+          className="relative w-full min-h-[320px] sm:min-h-[380px] bg-[#08080a] overflow-hidden"
         >
-          {/* Banner — high visibility, light scrim only where text sits */}
+          {/* Ambient background */}
           <div className="absolute inset-0 z-0">
             <img
-              src={activeHero.banner || activeHero.poster}
-              alt={activeHero.title}
-              className="w-full h-full object-cover object-top sm:object-center brightness-110 contrast-[1.05] transition-all duration-700"
+              src={hasLandscapeBanner ? bannerSrc : posterSrc}
+              alt=""
+              aria-hidden
+              className={`w-full h-full transition-all duration-700 ${
+                hasLandscapeBanner
+                  ? "object-cover object-center brightness-105"
+                  : "object-cover object-center scale-110 blur-2xl opacity-50 brightness-90"
+              }`}
               referrerPolicy="no-referrer"
             />
-            {/* Soft bottom fade for readable text — not a heavy dark wash */}
-            <div className="absolute inset-0 bg-gradient-to-t from-cinema-black/90 via-cinema-black/25 to-black/10" />
-            <div className="absolute inset-0 bg-gradient-to-r from-cinema-black/55 via-transparent to-transparent hidden md:block" />
+            <div className="absolute inset-0 bg-gradient-to-r from-[#08080a] via-[#08080a]/75 to-[#08080a]/40" />
+            <div className="absolute inset-0 bg-gradient-to-t from-[#08080a] via-transparent to-[#08080a]/30" />
           </div>
 
-          {/* Carousel Slider Controls */}
+          {/* Carousel controls */}
           {featuredMovies.length > 1 && (
-            <div className="absolute right-4 sm:right-6 bottom-6 sm:bottom-8 z-20 flex gap-2">
+            <div className="absolute right-4 sm:right-6 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-2">
               <button
                 onClick={handlePrevHero}
-                className="p-2.5 rounded-full bg-black/40 border border-white/15 hover:border-gold-500 text-slate-200 hover:text-white backdrop-blur-sm transition-all cursor-pointer"
+                className="p-2.5 rounded-full bg-black/50 border border-white/15 hover:border-gold-500 text-slate-200 hover:text-white backdrop-blur-sm transition-all cursor-pointer"
               >
                 <ChevronLeft className="w-5 h-5" />
               </button>
               <button
                 onClick={handleNextHero}
-                className="p-2.5 rounded-full bg-black/40 border border-white/15 hover:border-gold-500 text-slate-200 hover:text-white backdrop-blur-sm transition-all cursor-pointer"
+                className="p-2.5 rounded-full bg-black/50 border border-white/15 hover:border-gold-500 text-slate-200 hover:text-white backdrop-blur-sm transition-all cursor-pointer"
               >
                 <ChevronRight className="w-5 h-5" />
               </button>
             </div>
           )}
 
-          {/* Hero Content layout */}
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full pb-6 sm:pb-10 relative z-10">
-            <div className="max-w-2xl flex flex-col gap-2.5 sm:gap-3">
-              <div className="flex items-center gap-2.5">
-                <span className="bg-gold-500 text-black text-[10px] font-bold px-2 py-0.5 rounded-xs uppercase tracking-tighter">
-                  Featured Spotlight
-                </span>
-                <span className="text-white/90 text-xs font-mono font-semibold drop-shadow-sm">
-                  IMDB {activeHero.imdbRating.toFixed(1)}/10
-                </span>
+          {/* Content: poster + text (always works with OMDb portraits) */}
+          <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+            <div className="flex flex-col sm:flex-row items-center sm:items-end gap-6 sm:gap-10">
+              {/* Sharp portrait poster — not stretched across the banner */}
+              <div className="shrink-0 w-[140px] sm:w-[180px] lg:w-[210px] aspect-[2/3] rounded-md overflow-hidden shadow-2xl shadow-black/60 ring-1 ring-white/10 bg-cinema-card">
+                <img
+                  src={posterSrc}
+                  alt={activeHero.title}
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
               </div>
 
-              <h2 className="font-display font-black italic tracking-tighter uppercase text-2xl sm:text-4xl lg:text-5xl text-white leading-none drop-shadow-md">
-                {activeHero.title}
-              </h2>
+              <div className="flex-1 min-w-0 flex flex-col gap-2.5 sm:gap-3 text-center sm:text-left pb-1">
+                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2.5">
+                  <span className="bg-gold-500 text-black text-[10px] font-bold px-2 py-0.5 rounded-xs uppercase tracking-tighter">
+                    Featured Spotlight
+                  </span>
+                  <span className="text-white/90 text-xs font-mono font-semibold">
+                    IMDB {activeHero.imdbRating.toFixed(1)}/10
+                  </span>
+                  {activeHero.ageRating && (
+                    <span className="text-[10px] font-mono text-slate-300 border border-white/20 px-1.5 py-0.5 rounded-xs">
+                      {activeHero.ageRating}
+                    </span>
+                  )}
+                </div>
 
-              <p className="text-sm text-white/85 leading-relaxed line-clamp-2 sm:line-clamp-3 drop-shadow-sm max-w-xl">
-                {activeHero.synopsis}
-              </p>
+                <h2 className="font-display font-black italic tracking-tighter uppercase text-2xl sm:text-4xl lg:text-5xl text-white leading-none">
+                  {activeHero.title}
+                </h2>
 
-              {/* Action row */}
-              <div className="flex flex-wrap items-center gap-3 mt-1">
-                <button
-                  onClick={() => onBookMovie(activeHero)}
-                  className="px-5 py-2 bg-gold-600 hover:bg-gold-500 text-black text-xs font-bold uppercase tracking-widest transition-all rounded-xs active:scale-95 cursor-pointer shadow-md shadow-gold-600/20"
-                >
-                  Book Tickets
-                </button>
-                <button
-                  onClick={() => onSelectMovie(activeHero)}
-                  className="px-5 py-2 bg-black/35 backdrop-blur-md border border-white/25 text-white text-xs font-bold uppercase tracking-widest transition-all rounded-xs hover:bg-black/50 active:scale-95 cursor-pointer"
-                >
-                  View Details
-                </button>
+                <p className="text-sm text-slate-300 leading-relaxed line-clamp-3 max-w-xl mx-auto sm:mx-0">
+                  {activeHero.synopsis}
+                </p>
+
+                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3 mt-1">
+                  <button
+                    onClick={() => onBookMovie(activeHero)}
+                    className="px-5 py-2.5 bg-gold-600 hover:bg-gold-500 text-black text-xs font-bold uppercase tracking-widest transition-all rounded-xs active:scale-95 cursor-pointer shadow-md shadow-gold-600/20"
+                  >
+                    Book Tickets
+                  </button>
+                  <button
+                    onClick={() => onSelectMovie(activeHero)}
+                    className="px-5 py-2.5 bg-white/10 backdrop-blur-md border border-white/20 text-white text-xs font-bold uppercase tracking-widest transition-all rounded-xs hover:bg-white/15 active:scale-95 cursor-pointer"
+                  >
+                    View Details
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         </section>
-      )}
+        );
+      })()}
 
       {/* SECTION 2: NOW SHOWING */}
       <section id="now-showing" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
