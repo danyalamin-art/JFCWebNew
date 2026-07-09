@@ -18,6 +18,8 @@ export interface Movie {
   gallery: string[];
   isComingSoon: boolean;
   isFeatured: boolean;
+  /** Lower = earlier in homepage Featured Spotlight carousel (optional). */
+  featuredOrder?: number;
 }
 
 export interface Showtime {

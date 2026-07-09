@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { LayoutDashboard, Clapperboard, Calendar, Ticket, Percent, Settings, Plus, Trash2, Edit, Save, RefreshCw, Undo, DollarSign, Users, Shield, MapPin, Phone, Mail, Sparkles, Wand2, Loader2, Download, Upload, Database } from "lucide-react";
+import { LayoutDashboard, Clapperboard, Calendar, Ticket, Percent, Settings, Plus, Trash2, Edit, Save, RefreshCw, Undo, DollarSign, Users, Shield, MapPin, Phone, Mail, Sparkles, Wand2, Loader2, Download, Upload, Database, ChevronUp, ChevronDown } from "lucide-react";
 import { DatabaseSchema, Movie, Showtime, SnackItem, Promotion, FAQ, Booking, CinemaSettings } from "../types";
 import {
   fetchDashboardStats,
@@ -32,7 +32,12 @@ interface AdminDashboardProps {
 }
 
 export default function AdminDashboard({ initialDb, onRefreshData, onClose }: AdminDashboardProps) {
-  const [activeTab, setActiveTab] = useState<"stats" | "movies" | "showtimes" | "bookings" | "promos" | "settings">("stats");
+  const [activeTab, setActiveTab] = useState<
+    "stats" | "movies" | "spotlight" | "showtimes" | "bookings" | "promos" | "settings"
+  >("stats");
+  const [spotlightBusyId, setSpotlightBusyId] = useState<string | null>(null);
+  const [spotlightMessage, setSpotlightMessage] = useState("");
+  const [spotlightAddId, setSpotlightAddId] = useState("");
 
   // Admin session token (server-validated); token lives in sessionStorage
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => !!getAdminToken());
@@ -321,6 +326,80 @@ export default function AdminDashboard({ initialDb, onRefreshData, onClose }: Ad
       setTimeout(() => setKeySavedMessage(""), 3000);
     } catch (err: any) {
       setAiError(err.message || "Could not save OMDb key");
+    }
+  };
+
+  // —— Homepage Featured Spotlight (hero carousel) ——
+  const spotlightMovies = initialDb.movies
+    .filter((m) => m.isFeatured)
+    .slice()
+    .sort((a, b) => (a.featuredOrder ?? 999) - (b.featuredOrder ?? 999));
+
+  const availableForSpotlight = initialDb.movies.filter((m) => !m.isFeatured);
+
+  const nextFeaturedOrder = () => {
+    const orders = spotlightMovies.map((m) => m.featuredOrder ?? 0);
+    return orders.length ? Math.max(...orders) + 1 : 0;
+  };
+
+  const setSpotlightMessageTemp = (msg: string) => {
+    setSpotlightMessage(msg);
+    setTimeout(() => setSpotlightMessage((cur) => (cur === msg ? "" : cur)), 3500);
+  };
+
+  const handleAddToSpotlight = async () => {
+    if (!spotlightAddId) return;
+    setSpotlightBusyId(spotlightAddId);
+    try {
+      await updateMovie(spotlightAddId, {
+        isFeatured: true,
+        featuredOrder: nextFeaturedOrder(),
+      });
+      setSpotlightAddId("");
+      setSpotlightMessageTemp("Movie added to Featured Spotlight.");
+      onRefreshData();
+    } catch (err: any) {
+      showAdminNotification(err.message || "Failed to add to spotlight", true);
+    } finally {
+      setSpotlightBusyId(null);
+    }
+  };
+
+  const handleRemoveFromSpotlight = async (movieId: string) => {
+    setSpotlightBusyId(movieId);
+    try {
+      await updateMovie(movieId, { isFeatured: false, featuredOrder: 999 });
+      setSpotlightMessageTemp("Removed from Featured Spotlight.");
+      onRefreshData();
+    } catch (err: any) {
+      showAdminNotification(err.message || "Failed to remove from spotlight", true);
+    } finally {
+      setSpotlightBusyId(null);
+    }
+  };
+
+  const handleMoveSpotlight = async (movieId: string, direction: "up" | "down") => {
+    const list = spotlightMovies;
+    const idx = list.findIndex((m) => m.id === movieId);
+    if (idx < 0) return;
+    const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= list.length) return;
+
+    const a = list[idx];
+    const b = list[swapIdx];
+    const orderA = a.featuredOrder ?? idx;
+    const orderB = b.featuredOrder ?? swapIdx;
+
+    setSpotlightBusyId(movieId);
+    try {
+      await updateMovie(a.id, { featuredOrder: orderB });
+      await updateMovie(b.id, { featuredOrder: orderA });
+      setSpotlightMessageTemp("Spotlight order updated.");
+      onRefreshData();
+    } catch (err: any) {
+      showAdminNotification(err.message || "Failed to reorder spotlight", true);
+    } finally {
+      setSpotlightBusyId(null);
     }
   };
 
@@ -625,6 +704,16 @@ export default function AdminDashboard({ initialDb, onRefreshData, onClose }: Ad
           >
             <Clapperboard className="w-4 h-4 shrink-0" />
             Movies Manager
+          </button>
+
+          <button
+            onClick={() => setActiveTab("spotlight")}
+            className={`flex items-center gap-2.5 w-full text-left px-3.5 py-2.5 rounded-sm font-bold text-[10px] uppercase tracking-wider transition-all cursor-pointer ${
+              activeTab === "spotlight" ? "bg-gold-600/10 text-gold-500 border border-white/5" : "text-slate-400 hover:bg-white/5 hover:text-white border border-transparent"
+            }`}
+          >
+            <Sparkles className="w-4 h-4 shrink-0" />
+            Featured Spotlight
           </button>
 
           <button
@@ -1205,6 +1294,144 @@ export default function AdminDashboard({ initialDb, onRefreshData, onClose }: Ad
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {/* TAB: FEATURED SPOTLIGHT (homepage hero) */}
+          {activeTab === "spotlight" && (
+            <div id="tab-spotlight-panel" className="flex flex-col gap-6">
+              <div>
+                <h3 className="font-display font-extrabold text-lg text-white flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-gold-500" />
+                  Featured Spotlight
+                </h3>
+                <p className="text-xs text-cinema-text-muted mt-1">
+                  Control the large homepage hero carousel (“Featured Spotlight”). Add movies from your catalog,
+                  remove them, or reorder how they slide.
+                </p>
+              </div>
+
+              {/* Add movie to spotlight */}
+              <div className="bg-cinema-card border border-gold-500/15 rounded-xl p-5 flex flex-col gap-3">
+                <h4 className="text-[10px] font-mono font-bold text-gold-500 uppercase tracking-wider">
+                  Add movie to spotlight
+                </h4>
+                {availableForSpotlight.length === 0 ? (
+                  <p className="text-xs text-slate-500">
+                    All movies are already in the spotlight, or no movies exist yet. Add films under Movies Manager first.
+                  </p>
+                ) : (
+                  <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-end">
+                    <div className="flex-grow">
+                      <label className="text-[10px] font-mono text-slate-500 uppercase block mb-1">Select movie</label>
+                      <select
+                        value={spotlightAddId}
+                        onChange={(e) => setSpotlightAddId(e.target.value)}
+                        className="w-full bg-cinema-black border border-cinema-gray rounded-lg px-3 py-2.5 text-xs text-white focus:outline-none focus:border-gold-500"
+                      >
+                        <option value="">Choose a movie…</option>
+                        {availableForSpotlight.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.title}
+                            {m.isComingSoon ? " (Coming Soon)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!spotlightAddId || !!spotlightBusyId}
+                      onClick={handleAddToSpotlight}
+                      className="px-5 py-2.5 rounded-lg bg-gold-500 hover:bg-gold-600 disabled:opacity-40 text-cinema-black font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shrink-0"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Add to spotlight
+                    </button>
+                  </div>
+                )}
+                {spotlightMessage && (
+                  <p className="text-xs text-emerald-400 font-semibold">{spotlightMessage}</p>
+                )}
+              </div>
+
+              {/* Current spotlight list */}
+              <div className="bg-cinema-card border border-cinema-gray rounded-xl p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h4 className="font-display font-bold text-xs text-white uppercase tracking-wider">
+                    Current spotlight slides ({spotlightMovies.length})
+                  </h4>
+                  <span className="text-[10px] text-slate-500 font-mono">
+                    Order = carousel left → right
+                  </span>
+                </div>
+
+                {spotlightMovies.length === 0 ? (
+                  <div className="py-10 text-center border border-dashed border-white/10 rounded-lg">
+                    <Sparkles className="w-8 h-8 text-slate-600 mx-auto mb-2" />
+                    <p className="text-xs text-slate-500">
+                      No featured movies yet. The homepage will fall back to the first movie in the catalog.
+                    </p>
+                    <p className="text-[10px] text-slate-600 mt-1">Add at least one film above for a proper spotlight.</p>
+                  </div>
+                ) : (
+                  <ul className="flex flex-col gap-2">
+                    {spotlightMovies.map((m, idx) => (
+                      <li
+                        key={m.id}
+                        className="flex items-center gap-3 p-3 rounded-lg bg-black/40 border border-white/5 hover:border-gold-500/20 transition-colors"
+                      >
+                        <span className="text-[10px] font-mono text-slate-500 w-5 shrink-0">{idx + 1}</span>
+                        <img
+                          src={m.poster}
+                          alt=""
+                          className="w-10 h-14 object-cover rounded-sm bg-black shrink-0"
+                          referrerPolicy="no-referrer"
+                        />
+                        <div className="min-w-0 flex-grow">
+                          <p className="text-xs font-bold text-white truncate">{m.title}</p>
+                          <p className="text-[10px] text-slate-500 mt-0.5">
+                            {m.genre?.slice(0, 2).join(" · ")}
+                            {m.isComingSoon ? " · Coming Soon" : ""}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            title="Move earlier in carousel"
+                            disabled={idx === 0 || spotlightBusyId === m.id}
+                            onClick={() => handleMoveSpotlight(m.id, "up")}
+                            className="p-1.5 rounded bg-white/5 text-slate-300 hover:text-white disabled:opacity-30 cursor-pointer"
+                          >
+                            <ChevronUp className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            title="Move later in carousel"
+                            disabled={idx === spotlightMovies.length - 1 || spotlightBusyId === m.id}
+                            onClick={() => handleMoveSpotlight(m.id, "down")}
+                            className="p-1.5 rounded bg-white/5 text-slate-300 hover:text-white disabled:opacity-30 cursor-pointer"
+                          >
+                            <ChevronDown className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={spotlightBusyId === m.id}
+                            onClick={() => handleRemoveFromSpotlight(m.id)}
+                            className="px-2.5 py-1.5 rounded bg-red-600/15 text-red-400 hover:bg-red-600 hover:text-white text-[10px] font-bold uppercase tracking-wider disabled:opacity-40 cursor-pointer"
+                          >
+                            {spotlightBusyId === m.id ? "…" : "Remove"}
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <p className="text-[10px] text-slate-600 leading-relaxed">
+                Tip: You can still toggle “Featured Blockbuster” when editing a movie under Movies Manager.
+                This tab is the dedicated control for the homepage spotlight.
+              </p>
             </div>
           )}
 

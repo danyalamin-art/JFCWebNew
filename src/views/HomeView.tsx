@@ -11,8 +11,11 @@ interface HomeViewProps {
 }
 
 export default function HomeView({ db, onNavigate, onSelectMovie, onBookMovie }: HomeViewProps) {
-  // Hero Carousel State
-  const featuredMovies = db.movies.filter(m => m.isFeatured);
+  // Hero carousel — movies marked Featured in CMS (ordered by featuredOrder)
+  const featuredMovies = db.movies
+    .filter((m) => m.isFeatured)
+    .slice()
+    .sort((a, b) => (a.featuredOrder ?? 999) - (b.featuredOrder ?? 999));
   const [heroIdx, setHeroIdx] = useState(0);
 
   useEffect(() => {
