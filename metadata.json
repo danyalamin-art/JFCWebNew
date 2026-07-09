@@ -1,0 +1,6 @@
+{
+  "name": "JFC Cineplex",
+  "description": "Premium cinema website for JFC Cineplex, Islamabad, featuring showtimes, interactive seat booking, snack pre-orders, and a persistent CMS admin dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

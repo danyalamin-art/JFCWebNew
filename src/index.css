@@ -1,0 +1,53 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Outfit", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Custom Sophisticated Dark Theme Colors */
+  --color-gold-400: #fbbf24; /* Amber-400 */
+  --color-gold-500: #f59e0b; /* Amber-500 */
+  --color-gold-600: #d97706; /* Amber-600 */
+  --color-cinema-red: #ef4444; /* Sleeker red matching modern dark theme */
+  --color-cinema-black: #050505; /* Sophisticated pitch dark black */
+  --color-cinema-card: #0d0d0f; /* Sleek extremely dark charcoal card background */
+  --color-cinema-gray: #141417; /* Very subtle grey border/divider color */
+  --color-cinema-text-muted: #94a3b8;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-cinema-black);
+    color: #F8FAFC;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Custom Scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--color-cinema-black);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-cinema-gray);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-gold-500);
+  }
+}
+
+/* Animations helpers */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-out forwards;
+}
