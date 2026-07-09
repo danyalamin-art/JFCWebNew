@@ -14,6 +14,7 @@ import {
   deletePromotion,
   updateSettings,
   autoFetchMovieDetails,
+  searchMovieSuggestions,
   adminLogin,
   adminLogout,
   getAdminToken,
@@ -21,6 +22,7 @@ import {
   importDatabase,
   fetchOmdbStatus,
   saveOmdbKey,
+  type MovieSuggestion,
 } from "../lib/api";
 
 interface AdminDashboardProps {
@@ -139,6 +141,10 @@ export default function AdminDashboard({ initialDb, onRefreshData, onClose }: Ad
   const [omdbKeyInput, setOmdbKeyInput] = useState("");
   const [keySavedMessage, setKeySavedMessage] = useState("");
   const [aiMovieTitle, setAiMovieTitle] = useState("");
+  const [selectedImdbId, setSelectedImdbId] = useState<string | undefined>();
+  const [suggestions, setSuggestions] = useState<MovieSuggestion[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiStatusMessage, setAiStatusMessage] = useState("");
   const [aiError, setAiError] = useState("");
@@ -156,6 +162,32 @@ export default function AdminDashboard({ initialDb, onRefreshData, onClose }: Ad
         setOmdbHint(null);
       });
   }, [isAuthenticated]);
+
+  // Debounced OMDb title suggestions while typing
+  useEffect(() => {
+    if (!isAuthenticated || isAiLoading) return;
+    const q = aiMovieTitle.trim();
+    if (q.length < 2) {
+      setSuggestions([]);
+      setSuggestionsLoading(false);
+      return;
+    }
+
+    setSuggestionsLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const list = await searchMovieSuggestions(q);
+        setSuggestions(list);
+        setShowSuggestions(true);
+      } catch {
+        setSuggestions([]);
+      } finally {
+        setSuggestionsLoading(false);
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [aiMovieTitle, isAuthenticated, isAiLoading]);
 
   // Add Showtime
   const [showtimeForm, setShowtimeForm] = useState({
@@ -233,6 +265,13 @@ export default function AdminDashboard({ initialDb, onRefreshData, onClose }: Ad
     fileReader.readAsText(file);
   };
 
+  const pickSuggestion = (s: MovieSuggestion) => {
+    setAiMovieTitle(s.title);
+    setSelectedImdbId(s.imdbID || undefined);
+    setSuggestions([]);
+    setShowSuggestions(false);
+  };
+
   // Movie actions — type title → server OMDb fills details → save
   const handleAiAutoAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -241,10 +280,11 @@ export default function AdminDashboard({ initialDb, onRefreshData, onClose }: Ad
     setIsAiLoading(true);
     setAiError("");
     setMovieSuccess("");
+    setShowSuggestions(false);
     setAiStatusMessage("Looking up movie on OMDb…");
 
     try {
-      const fetchedDetails = await autoFetchMovieDetails(aiMovieTitle);
+      const fetchedDetails = await autoFetchMovieDetails(aiMovieTitle, selectedImdbId);
       setAiStatusMessage("Saving movie to cinema database…");
       await createMovie(fetchedDetails);
 
@@ -252,6 +292,8 @@ export default function AdminDashboard({ initialDb, onRefreshData, onClose }: Ad
         `"${fetchedDetails.title}" added with IMDb rating, cast, synopsis, and poster. You can edit trailer URL anytime.`
       );
       setAiMovieTitle("");
+      setSelectedImdbId(undefined);
+      setSuggestions([]);
       onRefreshData();
     } catch (err: any) {
       console.error(err);
@@ -806,19 +848,72 @@ export default function AdminDashboard({ initialDb, onRefreshData, onClose }: Ad
                   </div>
 
                   <form onSubmit={handleAiAutoAdd} className="flex flex-col md:flex-row gap-3 items-end mt-1">
-                    <div className="flex-grow w-full">
+                    <div className="flex-grow w-full relative">
                       <label className="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-wider block mb-1">
                         Movie Title / Name
+                        {suggestionsLoading && (
+                          <span className="ml-2 text-gold-500/80 normal-case tracking-normal font-medium">
+                            finding matches…
+                          </span>
+                        )}
                       </label>
                       <input
                         type="text"
                         required
-                        placeholder="e.g. Gladiator II, Oppenheimer, Spider-Man: No Way Home..."
+                        autoComplete="off"
+                        placeholder="Start typing e.g. Spider-Man…"
                         value={aiMovieTitle}
-                        onChange={(e) => setAiMovieTitle(e.target.value)}
+                        onChange={(e) => {
+                          setAiMovieTitle(e.target.value);
+                          setSelectedImdbId(undefined);
+                          setShowSuggestions(true);
+                        }}
+                        onFocus={() => {
+                          if (suggestions.length > 0) setShowSuggestions(true);
+                        }}
+                        onBlur={() => {
+                          // Delay so click on suggestion registers
+                          setTimeout(() => setShowSuggestions(false), 180);
+                        }}
                         disabled={isAiLoading}
                         className="w-full bg-cinema-black border border-cinema-gray rounded-lg px-4 py-3 text-sm text-white focus:outline-none focus:border-gold-500 transition-colors"
                       />
+
+                      {showSuggestions && suggestions.length > 0 && !isAiLoading && (
+                        <ul
+                          className="absolute z-30 left-0 right-0 top-full mt-1 max-h-72 overflow-y-auto rounded-lg border border-white/10 bg-[#0c0c0e] shadow-2xl shadow-black/50"
+                          role="listbox"
+                        >
+                          {suggestions.map((s) => (
+                            <li key={s.imdbID || `${s.title}-${s.year}`}>
+                              <button
+                                type="button"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => pickSuggestion(s)}
+                                className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-gold-500/10 border-b border-white/5 last:border-0 transition-colors cursor-pointer"
+                              >
+                                {s.poster ? (
+                                  <img
+                                    src={s.poster}
+                                    alt=""
+                                    className="w-8 h-12 object-cover rounded-sm bg-black shrink-0"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ) : (
+                                  <div className="w-8 h-12 rounded-sm bg-white/5 shrink-0" />
+                                )}
+                                <div className="min-w-0">
+                                  <p className="text-xs font-semibold text-white truncate">{s.title}</p>
+                                  <p className="text-[10px] text-slate-500 font-mono mt-0.5">
+                                    {s.year}
+                                    {s.type ? ` · ${s.type}` : ""}
+                                  </p>
+                                </div>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
 
                     <button

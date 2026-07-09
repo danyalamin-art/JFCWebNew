@@ -98,11 +98,29 @@ export async function deleteMovie(id: string): Promise<boolean> {
   return true;
 }
 
-export async function autoFetchMovieDetails(title: string): Promise<Omit<Movie, "id">> {
+export type MovieSuggestion = {
+  title: string;
+  year: string;
+  imdbID: string;
+  type: string;
+  poster: string;
+};
+
+export async function searchMovieSuggestions(query: string): Promise<MovieSuggestion[]> {
+  const data = await api<{ suggestions: MovieSuggestion[] }>(
+    `/api/movies/search-suggestions?q=${encodeURIComponent(query)}`
+  );
+  return data.suggestions || [];
+}
+
+export async function autoFetchMovieDetails(
+  title: string,
+  imdbID?: string
+): Promise<Omit<Movie, "id">> {
   // OMDb key lives on the server (.env + Firestore) — no need to send from browser
   const data = await api<{ movie: Omit<Movie, "id"> }>("/api/movies/auto-fetch", {
     method: "POST",
-    body: JSON.stringify({ title }),
+    body: JSON.stringify({ title, imdbID: imdbID || undefined }),
   });
   return data.movie;
 }

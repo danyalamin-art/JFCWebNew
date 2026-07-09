@@ -484,8 +484,41 @@ const getInitialDatabase = (): DatabaseSchema => {
   };
 };
 
-async function fetchMovieFromOmdb(title: string, omdbKey: string): Promise<Omit<Movie, "id"> | null> {
-  const omdbUrl = `https://www.omdbapi.com/?apikey=${encodeURIComponent(omdbKey)}&t=${encodeURIComponent(title)}&plot=full`;
+/** Typeahead list — OMDb search (`s=`). */
+async function searchOmdbSuggestions(
+  query: string,
+  omdbKey: string
+): Promise<{ title: string; year: string; imdbID: string; type: string; poster: string }[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+
+  const omdbUrl = `https://www.omdbapi.com/?apikey=${encodeURIComponent(omdbKey)}&s=${encodeURIComponent(q)}&type=movie`;
+  const res = await fetch(omdbUrl);
+  if (!res.ok) return [];
+  const data = await res.json();
+  if (data.Response !== "True" || !Array.isArray(data.Search)) {
+    return [];
+  }
+
+  return data.Search.slice(0, 8).map((item: any) => ({
+    title: item.Title || "",
+    year: item.Year || "",
+    imdbID: item.imdbID || "",
+    type: item.Type || "movie",
+    poster: item.Poster && item.Poster !== "N/A" ? item.Poster : "",
+  }));
+}
+
+async function fetchMovieFromOmdb(
+  title: string,
+  omdbKey: string,
+  imdbID?: string
+): Promise<Omit<Movie, "id"> | null> {
+  const params = new URLSearchParams({ apikey: omdbKey, plot: "full" });
+  if (imdbID) params.set("i", imdbID);
+  else params.set("t", title);
+
+  const omdbUrl = `https://www.omdbapi.com/?${params.toString()}`;
   const res = await fetch(omdbUrl);
   if (!res.ok) return null;
   const data = await res.json();
@@ -647,9 +680,28 @@ async function startServer() {
     res.json(database.movies);
   });
 
+  // Live title suggestions while typing (OMDb `s=` search)
+  app.get("/api/movies/search-suggestions", requireAdmin, async (req, res) => {
+    const q = String(req.query.q || "").trim();
+    if (q.length < 2) {
+      return res.json({ suggestions: [] });
+    }
+    try {
+      const omdbKey = await resolveOmdbKey();
+      if (!omdbKey) {
+        return res.status(500).json({ error: "OMDb API key is not configured" });
+      }
+      const suggestions = await searchOmdbSuggestions(q, omdbKey);
+      res.json({ suggestions });
+    } catch (err: any) {
+      console.error("OMDb suggestions failed:", err);
+      res.status(500).json({ error: err.message || "Suggestion search failed" });
+    }
+  });
+
   // OMDb (primary) → Gemini (optional fallback). Enter title in admin; details auto-fill.
   app.post("/api/movies/auto-fetch", requireAdmin, async (req, res) => {
-    const { title, omdbKey: bodyKey } = req.body || {};
+    const { title, omdbKey: bodyKey, imdbID } = req.body || {};
     if (!title || !String(title).trim()) {
       return res.status(400).json({ error: "Movie title is required" });
     }
@@ -659,8 +711,12 @@ async function startServer() {
 
     try {
       if (omdbKey) {
-        console.log(`OMDb lookup: ${title}`);
-        const movie = await fetchMovieFromOmdb(String(title).trim(), omdbKey);
+        console.log(`OMDb lookup: ${title}${imdbID ? ` (${imdbID})` : ""}`);
+        const movie = await fetchMovieFromOmdb(
+          String(title).trim(),
+          omdbKey,
+          imdbID ? String(imdbID) : undefined
+        );
         if (movie) {
           return res.json({ success: true, movie, source: "omdb" });
         }
