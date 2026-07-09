@@ -10,3 +10,6 @@ db.json
 *.zip
 .firebase/
 firebase-debug.log
+firebase-service-account.json
+*firebase*adminsdk*.json
+serviceAccount*.json
